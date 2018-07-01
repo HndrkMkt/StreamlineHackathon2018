@@ -3304,12 +3304,21 @@ var dataForLand = [];
 // }
 
 d3.text("output/bilateral_relationships-1530446005000/part-00000", function(error, raw) {
-    }).then(function(result) {
+}).then(function(result) {
     dataForLand=d3.dsvFormat(";").parse("actor1;actor2;unk;count\n" + result).map(function(d) {
         return {actor1: d.actor1.toLowerCase(), actor2:d.actor2.toLowerCase(), count:parseFloat(d.count)};
 
     });
 });
+
+d3.text("output/bilateral_relationships-1530446005000/part-00001", function(error, raw) {
+}).then(function(result) {
+    dataForLand = dataForLand.concat(d3.dsvFormat(";").parse("actor1;actor2;unk;count\n" + result).map(function(d) {
+        return {actor1: d.actor1.toLowerCase(), actor2:d.actor2.toLowerCase(), count:parseFloat(d.count)};
+
+    }));
+});
+
 
 
 var actorTypesForLand;
