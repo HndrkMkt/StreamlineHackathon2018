@@ -54,27 +54,30 @@ public class SparkJavaJob {
 
         // function to store intermediate values in the state
         // it is called in the mapWithState function of DStreamclassifiers/
-        Function3<Tuple4<Date, String, String, String>, Optional<Integer>, State<Integer>, Tuple2<Tuple4<Date, String, String, String>, Integer>> mappingFunc =
-                new Function3<Tuple4<Date, String, String, String>, Optional<Integer>, State<Integer>, Tuple2<Tuple4<Date, String, String, String>, Integer>>() {
+        Function3<Tuple4<Date, String, String, String>, Optional<Tuple2<Integer, Double>>, State<Tuple2<Integer, Double>>, Tuple2<Tuple4<Date, String, String, String>, Tuple2<Integer, Double>>> mappingFunc =
+                new Function3<Tuple4<Date, String, String, String>, Optional<Tuple2<Integer, Double>>, State<Tuple2<Integer, Double>>, Tuple2<Tuple4<Date, String, String, String>, Tuple2<Integer, Double>>>() {
                     @Override
-                    public Tuple2<Tuple4<Date, String, String, String>, Integer> call(Tuple4<Date, String, String, String> keyTuple, Optional<Integer> count, State<Integer> state) throws Exception {
-                        Integer sum = count.orElse(1) + (state.exists() ? state.get() : 0);
-                        Tuple2<Tuple4<Date, String, String, String>, Integer> output = new Tuple2<>(keyTuple, sum);
-                        state.update(sum);
+                    public Tuple2<Tuple4<Date, String, String, String>, Tuple2<Integer, Double>> call(Tuple4<Date, String, String, String> keyTuple, Optional<Tuple2<Integer, Double>> optValue, State<Tuple2<Integer, Double>> state) throws Exception {
+                        Tuple2<Integer, Double> value = optValue.orElse(new Tuple2<>(1, 0.));
+                        Tuple2<Integer, Double> stateValue = (state.exists() ? state.get() : new Tuple2<>(0, 0.));
+                        Tuple2<Integer, Double> resultState = new Tuple2<>(stateValue._1() + value._1(), stateValue._2() + value._2());
+                        Tuple2<Tuple4<Date, String, String, String>, Tuple2<Integer, Double>> output = new Tuple2<>(keyTuple, resultState);
+                        state.update(resultState);
                         return output;
                     }
                 };
 
-        Function<List<Tuple2<String, Integer>>, List<Tuple2<String, Integer>>> sortingFunc =
-                new Function<List<Tuple2<String, Integer>>, List<Tuple2<String, Integer>>>() {
+        Function<List<Tuple3<String, Integer, Double>>, List<Tuple3<String, Integer, Double>>> sortingFunc =
+                new Function<List<Tuple3<String, Integer, Double>>, List<Tuple3<String, Integer, Double>>>() {
                     @Override
-                    public List<Tuple2<String, Integer>> call(List<Tuple2<String, Integer>> inputList) {
-                        Collections.sort(inputList, new Comparator<Tuple2<String, Integer>>() {
+                    public List<Tuple3<String, Integer, Double>> call(List<Tuple3<String, Integer, Double>> inputList) {
+                        Collections.sort(inputList, new Comparator<Tuple3<String, Integer, Double>>() {
                             @Override
-                            public int compare(Tuple2<String, Integer> o1, Tuple2<String, Integer> o2) {
+                            public int compare(Tuple3<String, Integer, Double> o1, Tuple3<String, Integer, Double> o2) {
                                 return -o1._2().compareTo(o2._2());
                             }
                         });
+                        inputList = new ArrayList<>(inputList.subList(0, Math.min(5, inputList.size())));
                         return inputList;
                     }
                 };
@@ -125,10 +128,10 @@ public class SparkJavaJob {
 //                        }
 //                    }
 //                })
-                .flatMapToPair(new PairFlatMapFunction<GDELTEvent, Tuple4<Date, String, String, String>, Integer>() {
+                .flatMapToPair(new PairFlatMapFunction<GDELTEvent, Tuple4<Date, String, String, String>, Tuple2<Integer, Double>>() {
                     @Override
-                    public Iterator<Tuple2<Tuple4<Date, String, String, String>, Integer>> call(GDELTEvent gdeltEvent) {
-                        ArrayList<Tuple2<Tuple4<Date, String, String, String>, Integer>> tuples = new ArrayList<>();
+                    public Iterator<Tuple2<Tuple4<Date, String, String, String>, Tuple2<Integer, Double>>> call(GDELTEvent gdeltEvent) {
+                        ArrayList<Tuple2<Tuple4<Date, String, String, String>, Tuple2<Integer, Double>>> tuples = new ArrayList<>();
 
                         String firstCountry = (gdeltEvent.actor1Code_countryCode != null ? gdeltEvent.actor1Code_countryCode : "UKNOWN");
                         String secondCountry = (gdeltEvent.actor2Code_countryCode != null ? gdeltEvent.actor2Code_countryCode : "UKNOWN");
@@ -139,33 +142,34 @@ public class SparkJavaJob {
                         Calendar cal = Calendar.getInstance();
                         cal.setTime(gdeltEvent.dateAdded);
                         cal.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY);
+                        Tuple2<Integer, Double> value = new Tuple2<>(1, gdeltEvent.avgTone);
                         if (firstCountry.compareTo(secondCountry) < 0) {
-                            tuples.add(new Tuple2<>(new Tuple4<>(cal.getTime(), firstCountry, secondCountry, firstActor), 1));
-                            tuples.add(new Tuple2<>(new Tuple4<>(cal.getTime(), firstCountry, secondCountry, secondActor), 1));
+                            tuples.add(new Tuple2<>(new Tuple4<>(cal.getTime(), firstCountry, secondCountry, firstActor), value));
+                            tuples.add(new Tuple2<>(new Tuple4<>(cal.getTime(), firstCountry, secondCountry, secondActor), value));
                         } else {
-                            tuples.add(new Tuple2<>(new Tuple4<>(cal.getTime(), secondCountry, firstCountry, firstActor), 1));
-                            tuples.add(new Tuple2<>(new Tuple4<>(cal.getTime(), secondCountry, firstCountry, secondActor), 1));
+                            tuples.add(new Tuple2<>(new Tuple4<>(cal.getTime(), secondCountry, firstCountry, firstActor), value));
+                            tuples.add(new Tuple2<>(new Tuple4<>(cal.getTime(), secondCountry, firstCountry, secondActor), value));
                         }
                         return tuples.iterator();
                     }
-                }).reduceByKey(new Function2<Integer, Integer, Integer>() {
+                }).reduceByKey(new Function2<Tuple2<Integer, Double>, Tuple2<Integer, Double>, Tuple2<Integer, Double>>() {
             @Override
-            public Integer call(Integer one, Integer two) throws Exception {
-                return one + two;
+            public Tuple2<Integer, Double> call(Tuple2<Integer, Double> one, Tuple2<Integer, Double> two) throws Exception {
+                return new Tuple2<>(one._1() + two._1(), one._2() + two._2());
             }
         })
                 .mapWithState(StateSpec.function(mappingFunc))
-                .mapToPair(new PairFunction<Tuple2<Tuple4<Date, String, String, String>, Integer>, Tuple3<Date, String, String>, List<Tuple2<String, Integer>>>() {
+                .mapToPair(new PairFunction<Tuple2<Tuple4<Date, String, String, String>, Tuple2<Integer, Double>>, Tuple3<Date, String, String>, List<Tuple3<String, Integer, Double>>>() {
                     @Override
-                    public Tuple2<Tuple3<Date, String, String>, List<Tuple2<String, Integer>>> call(Tuple2<Tuple4<Date, String, String, String>, Integer> input) throws Exception {
-                        List<Tuple2<String, Integer>> value = new ArrayList<>();
-                        value.add(new Tuple2<>(input._1()._4(), input._2()));
+                    public Tuple2<Tuple3<Date, String, String>, List<Tuple3<String, Integer, Double>>> call(Tuple2<Tuple4<Date, String, String, String>, Tuple2<Integer, Double>> input) throws Exception {
+                        List<Tuple3<String, Integer, Double>> value = new ArrayList<>();
+                        value.add(new Tuple3<>(input._1()._4(), input._2()._1(), input._2()._2() / input._2()._1()));
                         return new Tuple2<>(new Tuple3<>(input._1()._1(), input._1()._2(), input._1()._3()), value);
                     }
-                }).reduceByKey(new Function2<List<Tuple2<String, Integer>>, List<Tuple2<String, Integer>>, List<Tuple2<String, Integer>>>() {
+                }).reduceByKey(new Function2<List<Tuple3<String, Integer, Double>>, List<Tuple3<String, Integer, Double>>, List<Tuple3<String, Integer, Double>>>() {
             @Override
-            public List<Tuple2<String, Integer>> call(List<Tuple2<String, Integer>> one, List<Tuple2<String, Integer>> two) throws Exception {
-                ArrayList<Tuple2<String, Integer>> newList = new ArrayList<>();
+            public List<Tuple3<String, Integer, Double>> call(List<Tuple3<String, Integer, Double>> one, List<Tuple3<String, Integer, Double>> two) throws Exception {
+                ArrayList<Tuple3<String, Integer, Double>> newList = new ArrayList<>();
                 newList.addAll(one);
                 newList.addAll(two);
                 return newList;
