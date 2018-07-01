@@ -43,7 +43,7 @@ public class SparkJavaJob {
 //        ctx.addFile("/home/hendrik/projects/tu_berlin/dima/bdml/streamline-hackathon-boilerplate/english.all.3class.distsim.crf.ser.gz");
 //
 
-        String serializedClassifier = "e    nglish.all.3class.distsim.crf.ser.gz";
+        String serializedClassifier = "english.all.3class.distsim.crf.ser.gz";
 
         AbstractSequenceClassifier<CoreLabel> classifier = CRFClassifier.getClassifier(serializedClassifier);
 
@@ -64,6 +64,36 @@ public class SparkJavaJob {
                         return output;
                     }
                 };
+
+        Function<List<Tuple2<String, Integer>>, List<Tuple2<String, Integer>>> sortingFunc =
+                new Function<List<Tuple2<String, Integer>>, List<Tuple2<String, Integer>>>() {
+                    @Override
+                    public List<Tuple2<String, Integer>> call(List<Tuple2<String, Integer>> inputList) {
+                        Collections.sort(inputList, new Comparator<Tuple2<String, Integer>>() {
+                            @Override
+                            public int compare(Tuple2<String, Integer> o1, Tuple2<String, Integer> o2) {
+                                return -o1._2().compareTo(o2._2());
+                            }
+                        });
+                        return inputList;
+                    }
+                };
+
+//        Function<Iterable<Tuple2<String, Integer>, Iterable<Tuple2<String, Integer>> sortingFunct =
+//                new Function<Iterable<Tuple2<String, Integer>, Iterable<Tuple2<String, Integer>>() {
+//                    @Override
+//                    public Iterable<Tuple2<String, Integer>> call(Iterable<Tuple2<String, Integer>> input) throws Exception {
+//                        ArrayList<Tuple2<String, Integer>> tuples = new ArrayList<>();
+//                        for (Tuple2<String, Integer> tuple : input) {
+//                            tuples.add(tuple);
+//                        }
+//                        tuples.sort(new Comparator);
+//                        Integer sum = count.orElse(1) + (state.exists() ? state.get() : 0);
+//                        Tuple2<Tuple4<Date, String, String, String>, Integer> output = new Tuple2<>(keyTuple, sum);
+//                        state.update(sum);
+//                        return output;
+//                    }
+//                };
 
         jssc
                 .receiverStream(new GDELTInputReceiver(pathToGDELT))
@@ -125,12 +155,24 @@ public class SparkJavaJob {
             }
         })
                 .mapWithState(StateSpec.function(mappingFunc))
-                .mapToPair(new PairFunction<Tuple2<Tuple4<Date, String, String, String>, Integer>, Tuple3<Date, String, String>, Tuple2<String, Integer>>() {
+                .mapToPair(new PairFunction<Tuple2<Tuple4<Date, String, String, String>, Integer>, Tuple3<Date, String, String>, List<Tuple2<String, Integer>>>() {
                     @Override
-                    public Tuple2<Tuple3<Date, String, String>, Tuple2<String, Integer>> call(Tuple2<Tuple4<Date, String, String, String>, Integer> input) throws Exception {
-                        return new Tuple2<>(new Tuple3<>(input._1()._1(), input._1()._2(), input._1()._3()), new Tuple2<>(input._1()._4(), input._2()));
+                    public Tuple2<Tuple3<Date, String, String>, List<Tuple2<String, Integer>>> call(Tuple2<Tuple4<Date, String, String, String>, Integer> input) throws Exception {
+                        List<Tuple2<String, Integer>> value = new ArrayList<>();
+                        value.add(new Tuple2<>(input._1()._4(), input._2()));
+                        return new Tuple2<>(new Tuple3<>(input._1()._1(), input._1()._2(), input._1()._3()), value);
                     }
-                })
+                }).reduceByKey(new Function2<List<Tuple2<String, Integer>>, List<Tuple2<String, Integer>>, List<Tuple2<String, Integer>>>() {
+            @Override
+            public List<Tuple2<String, Integer>> call(List<Tuple2<String, Integer>> one, List<Tuple2<String, Integer>> two) throws Exception {
+                ArrayList<Tuple2<String, Integer>> newList = new ArrayList<>();
+                newList.addAll(one);
+                newList.addAll(two);
+                return newList;
+            }
+        })
+                .mapValues(sortingFunc)
+
 //                .mapValues()
 //
 //                .map(new Function<Tuple2<Tuple4<Date, String, String>, Integer>, String>() {
